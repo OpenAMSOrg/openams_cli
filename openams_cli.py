@@ -90,6 +90,11 @@ def deploy():
     console.rule("[bold blue]Starting Deployment")
     os.environ["PATH"] = f"{ENV_DIR}/bin:" + os.environ["PATH"]
 
+    # Ensure the current working directory is up to date if it's a git repo
+    if (script_dir / '.git').exists():
+        console.print('[bold cyan]Updating current directory from git...')
+        subprocess.run(['git', 'pull'], cwd=script_dir)
+
     katapult_path = Path.home() / "katapult"
     if not katapult_path.exists():
         console.print("[cyan]Cloning Katapult...")
