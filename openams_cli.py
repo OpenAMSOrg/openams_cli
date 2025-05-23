@@ -8,6 +8,21 @@ ENV_DIR = Path.home() / ".openams_env"
 VENV_PYTHON = ENV_DIR / "bin" / "python"
 VENV_PIP = ENV_DIR / "bin" / "pip"
 
+LICENSE_PATH = Path(__file__).parent / "LICENSE"
+
+def require_license_agreement():
+    if not LICENSE_PATH.exists():
+        console.print("[bold red]LICENSE file not found. Exiting.")
+        sys.exit(1)
+    with LICENSE_PATH.open() as f:
+        license_text = f.read()
+    console.rule("[bold yellow]License Agreement")
+    console.print(license_text)
+    agreed = Confirm.ask("Do you agree to the above license terms? [y/n]", default=False)
+    if not agreed:
+        console.print("[bold red]You must agree to the license terms to use this software. Exiting.")
+        sys.exit(1)
+
 # Step 1: Minimal environment setup to bootstrap required packages
 if not ENV_DIR.exists():
     print("[BOOTSTRAP] Creating virtual environment at ~/.openams_env...")
@@ -40,7 +55,7 @@ KLIPPER_REPO = "https://github.com/Klipper3d/klipper"
 
 @click.group()
 def cli():
-    pass
+    require_license_agreement()
 
 @cli.command()
 def setup():
@@ -70,6 +85,8 @@ def setup():
 @cli.command()
 def deploy():
     """Deploy Katapult and Klipper to the STM32G0B1 device."""
+    script_dir = Path.cwd()
+    
     console.rule("[bold blue]Starting Deployment")
     os.environ["PATH"] = f"{ENV_DIR}/bin:" + os.environ["PATH"]
 
@@ -97,10 +114,23 @@ def deploy():
     else:
         mode = Prompt.ask("printer.cfg not found. Configure FPS board for", choices=["bridge", "canbus"], default="bridge")
 
+    # Clean up old config files and run make clean before building
+    for proj_path in [katapult_path, Path.home() / "klipper"]:
+        for fname in [".config", ".config.old"]:
+            f = proj_path / fname
+            if f.exists():
+                f.unlink()
+        # Run make clean if Makefile exists
+        if (proj_path / "Makefile").exists():
+            subprocess.run(["make", "clean"], cwd=proj_path)
+
     # Katapult config selection
     katapult_config_file = f".config-katapult-{mode}"
     console.print(f"[yellow]Using Katapult configuration: {katapult_config_file}")
-    subprocess.run(["cp", str(katapult_config_file), ".config"])
+    if not (script_dir / katapult_config_file).exists():
+        console.print(f"[red]Katapult configuration file {katapult_config_file} not found in {script_dir}.")
+        sys.exit(1)
+    subprocess.run(["cp", str(script_dir / katapult_config_file), ".config"])
 
     console.print("[cyan]Building Katapult...")
     subprocess.run(["make"])
@@ -257,7 +287,10 @@ def deploy():
     # Klipper config selection
     klipper_config_file = f".config-klipper-{mode}"
     console.print(f"[yellow]Using Klipper configuration: {klipper_config_file}")
-    subprocess.run(["cp", str(klipper_config_file), ".config"])
+    if not (script_dir / klipper_config_file).exists():
+        console.print(f"[red]Klipper configuration file {klipper_config_file} not found in {script_dir}.")
+        sys.exit(1)
+    subprocess.run(["cp", str(script_dir / klipper_config_file), ".config"])
     console.print("[cyan]Building Klipper...")
     subprocess.run(["make"])
 
