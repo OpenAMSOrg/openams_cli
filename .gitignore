@@ -92,3 +92,4 @@ klipper/out/
 
 # Ignore downloaded installers
 /tmp/usbipd-win_*.msi
+.license_accepted

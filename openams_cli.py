@@ -317,19 +317,7 @@ def deploy():
 
         os.chdir(katapult_path)
 
-        # Determine mode based on printer.cfg
-        printer_cfg_path = Path.home() / "printer_data" / "config" / "printer.cfg"
-        if printer_cfg_path.exists():
-            with printer_cfg_path.open() as f:
-                contents = f.read()
-            if "canbus_serial" in contents:
-                mode = "canbus"
-                console.print("[green]Detected canbus mode from printer.cfg")
-            else:
-                mode = "bridge"
-                console.print("[green]Detected bridge mode from printer.cfg")
-        else:
-            mode = Prompt.ask("printer.cfg not found. Configure FPS board for", choices=["bridge", "canbus"], default="bridge")
+        mode = Prompt.ask("Configure FPS board for", choices=["bridge", "canbus"], default="bridge")
 
         # Clean up old config files and run make clean before building
         for proj_path in [katapult_path, Path.home() / "klipper"]:
@@ -390,7 +378,13 @@ def deploy():
         else:
             # Linux: try to find STM32_Programmer_CLI in PATH
             from shutil import which
-            st_prog = which("STM32_Programmer_CLI")
+            st_prog_paths = ["/home/jrlomas/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI"]
+            found_prog = None
+            for path in st_prog_paths:
+                if Path(path).exists():
+                    found_prog = path
+                    break
+            st_prog = found_prog or which("STM32_Programmer_CLI")
             if st_prog:
                 set_option_bytes = True
                 console.print(f"[yellow]Setting STM32 option bytes (nBOOT_SEL=0) using {st_prog} ...")
