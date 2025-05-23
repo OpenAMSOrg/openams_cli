@@ -3,25 +3,36 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+import shutil
 
 ENV_DIR = Path.home() / ".openams_env"
 VENV_PYTHON = ENV_DIR / "bin" / "python"
 VENV_PIP = ENV_DIR / "bin" / "pip"
 
 LICENSE_PATH = Path(__file__).parent / "LICENSE"
+LICENSE_ACCEPTED_PATH = Path(".license_accepted")
 
 def require_license_agreement():
+    # If the acceptance file exists, skip prompt
+    if LICENSE_ACCEPTED_PATH.exists():
+        return
     if not LICENSE_PATH.exists():
         console.print("[bold red]LICENSE file not found. Exiting.")
         sys.exit(1)
     with LICENSE_PATH.open() as f:
         license_text = f.read()
+    # Show a brief notice, not the full license
     console.rule("[bold yellow]License Agreement")
-    console.print(license_text)
-    agreed = Confirm.ask("Do you agree to the above license terms? [y/n]", default=False)
+    console.print("[yellow]You must accept the license to use this software.")
+    show_full = Confirm.ask("Show full license text?", default=False)
+    if show_full:
+        console.print(license_text)
+    agreed = Confirm.ask("Do you agree to the license terms? [y/n]", default=False)
     if not agreed:
         console.print("[bold red]You must agree to the license terms to use this software. Exiting.")
         sys.exit(1)
+    # Write acceptance file
+    LICENSE_ACCEPTED_PATH.touch()
 
 # Step 1: Minimal environment setup to bootstrap required packages
 if not ENV_DIR.exists():
@@ -86,6 +97,51 @@ def setup():
 def setup_canbus():
     """Set up CANBus network on this system (systemd-networkd, udev, config, reboot)."""
     console.rule("[bold blue]CANBus Network Setup")
+
+    # Prompt user to plug in CANBus bridge device
+    proceed = Confirm.ask("[bold yellow]Please plug in your USB-to-CANBus bridge device now. Continue?", default=True)
+    if not proceed:
+        console.print("[red]CANBus bridge device not detected. Exiting setup.")
+        sys.exit(1)
+
+    # --- Check for legacy can0 setup ---
+    legacy_iface_file = Path("/etc/network/interfaces.d/can0")
+    interfaces_file = Path("/etc/network/interfaces")
+    can0_exists = subprocess.run(["ip", "link", "show", "can0"], capture_output=True, text=True)
+    legacy_config_found = False
+
+    if can0_exists.returncode == 0:
+        # can0 interface exists, check for legacy config files
+        if legacy_iface_file.exists():
+            legacy_config_found = True
+            console.print("[yellow]Legacy CANBus config detected at /etc/network/interfaces.d/can0.")
+        elif interfaces_file.exists():
+            with interfaces_file.open() as f:
+                if "can0" in f.read():
+                    legacy_config_found = True
+                    console.print("[yellow]Legacy CANBus config detected in /etc/network/interfaces.")
+
+    if legacy_config_found:
+        console.print("[yellow]Removing legacy CANBus setup before proceeding...")
+        # Bring down can0 interface
+        subprocess.run(["sudo", "ip", "link", "set", "can0", "down"])
+        # Remove legacy config files
+        if legacy_iface_file.exists():
+            subprocess.run(["sudo", "rm", "-f", str(legacy_iface_file)])
+            console.print("[green]Removed /etc/network/interfaces.d/can0")
+        if interfaces_file.exists():
+            # Remove can0 lines from /etc/network/interfaces
+            with interfaces_file.open() as f:
+                lines = f.readlines()
+            with interfaces_file.open("w") as f:
+                for line in lines:
+                    if "can0" not in line:
+                        f.write(line)
+            console.print("[green]Removed can0 entries from /etc/network/interfaces")
+        # Restart networking
+        subprocess.run(["sudo", "systemctl", "restart", "networking"])
+        console.print("[green]Legacy CANBus setup removed. Proceeding with new setup...")
+
     # 1. Enable and start systemd-networkd
     console.print("[cyan]Enabling and starting systemd-networkd...")
     subprocess.run(["sudo", "systemctl", "enable", "systemd-networkd"])
@@ -116,13 +172,24 @@ def setup_canbus():
     netconf = subprocess.run(["cat", "/etc/systemd/network/25-can.network"], capture_output=True, text=True)
     console.print("[green]CAN network config:")
     console.print(netconf.stdout)
-    # 5. Reboot
-    console.print("[bold yellow]Setup complete. A reboot is required to finish CANBus setup.")
-    reboot = Confirm.ask("Reboot now?", default=True)
-    if reboot:
-        subprocess.run(["sudo", "reboot", "now"])
+
+    # 5. Verify CAN network interface is up
+    console.print("[cyan]Verifying CAN network interface is up...")
+    can_status = subprocess.run(["ip", "link", "show", "can0"], capture_output=True, text=True)
+    if can_status.returncode == 0 and "state UP" in can_status.stdout:
+        console.print("[bold green]can0 interface is UP and ready.")
+    elif can_status.returncode == 0:
+        console.print("[yellow]can0 interface found but not UP. Attempting to bring it up...")
+        subprocess.run(["sudo", "ip", "link", "set", "can0", "up"])
+        # Re-check status
+        can_status = subprocess.run(["ip", "link", "show", "can0"], capture_output=True, text=True)
+        if "state UP" in can_status.stdout:
+            console.print("[bold green]can0 interface is now UP and ready.")
+        else:
+            console.print("[red]Failed to bring up can0 interface. Please check your hardware and configuration.")
     else:
-        console.print("[yellow]Please reboot manually before using CANBus.")
+        console.print("[red]can0 interface not found. Please check your CAN hardware and configuration.")
+
     # 6. Print cabling/termination advice
     console.print("\n[bold blue]CANBus Cabling & Termination Advice")
     console.print("- Ensure exactly two 120Ω termination resistors: one at each end of the CANBus line.")
@@ -417,6 +484,134 @@ def deploy():
         subprocess.run(["sudo", "dfu-util", "-a", "0", "-s", "0x08000000:force:mass-erase", "-D", str(kancan_bin)])
         subprocess.run(["sudo", "dfu-util", "-a", "0", "-s", "0x08002000", "-D", str(oams_bin)])
         console.print("[bold green]Deployment complete. Verify operation on your OpenAMS Mainboard.")
+        return
+
+@cli.command()
+def query():
+    """Query the CANBus network for Klipper devices."""
+    console.rule("[bold blue]Querying CANBus Network")
+
+    # Ensure 'can' pip package is installed in the venv
+    pip = ENV_DIR / "bin" / "pip"
+    result = subprocess.run([str(pip), "show", "python-can"], capture_output=True, text=True)
+    if result.returncode != 0:
+        console.print("[yellow]python-can package not found. Installing...")
+        subprocess.run([str(pip), "install", "python-can"])
+
+    # Run the canbus_query script
+    canbus_query_script = Path.home() / "klipper" / "scripts" / "canbus_query.py"
+    if not canbus_query_script.exists():
+        console.print(f"[red]canbus_query.py script not found at {canbus_query_script}")
+        sys.exit(1)
+
+    console.print(f"[cyan]Running: {canbus_query_script} can0")
+    result = subprocess.run([str(VENV_PYTHON), str(canbus_query_script), "can0"], capture_output=True, text=True)
+    if result.returncode == 0:
+        console.print("[green]CANBus query result:")
+        console.print(result.stdout)
+        import re
+        uuids = re.findall(r'canbus_uuid=([0-9a-fA-F]+)', result.stdout)
+        if uuids:
+            console.print(f"[bold green]Found {len(uuids)} UUID(s):")
+            for i, uuid in enumerate(uuids, 1):
+                console.print(f"  [cyan]{i}: {uuid}[/cyan]")
+        else:
+            console.print("[yellow]No UUIDs found in CANBus query output.")
+            return
+
+        # Require at least two UUIDs for setup
+        if len(uuids) < 2:
+            console.print("[red]At least two CANBus UUIDs are required (one FPS and one Mainboard) to set up Klipper configuration automatically.")
+            console.print(f"[yellow]Found {len(uuids)} UUID(s). Please ensure both devices are connected and try again.")
+            return
+
+        # Ask if user wants to set up Klipper configuration
+        setup_klipper = Confirm.ask("[bold yellow]Would you like to set up a Klipper configuration using these UUIDs?", default=True)
+        if not setup_klipper:
+            return
+
+        # Let user select which UUID is FPS and which is Mainboard
+        from rich.prompt import IntPrompt
+        console.print("\nSelect the UUID for each device:")
+        for idx, uuid in enumerate(uuids, 1):
+            console.print(f"  {idx}: {uuid}")
+
+        fps_idx = IntPrompt.ask("Enter the number for the FPS board UUID", choices=[str(i) for i in range(1, len(uuids)+1)])
+        mainboard_idx = IntPrompt.ask("Enter the number for the Mainboard UUID", choices=[str(i) for i in range(1, len(uuids)+1) if str(i) != str(fps_idx)])
+
+        selected = [
+            (uuids[fps_idx-1], "fps"),
+            (uuids[mainboard_idx-1], "mainboard")
+        ]
+
+        # Download oams_sample.cfg and oams_macros.cfg if not present
+        import requests
+        klipper_openams_repo = "https://raw.githubusercontent.com/OpenAMSOrg/klipper_openams/master/"
+        sample_cfg_path = Path("/tmp/oams_sample.cfg")
+        macros_cfg_path = Path("/tmp/oams_macros.cfg")
+        for url, path in [
+            (klipper_openams_repo + "oams_sample.cfg", sample_cfg_path),
+            (klipper_openams_repo + "oams_macros.cfg", macros_cfg_path)
+        ]:
+            if not path.exists():
+                r = requests.get(url)
+                if r.status_code == 200:
+                    path.write_text(r.text)
+                else:
+                    console.print(f"[red]Failed to download {url}")
+                    return
+
+        # Prepare output config directory
+        config_dir = Path.home() / "printer_data" / "config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        oams_cfg_path = config_dir / "oams.cfg"
+        oams_macros_path = config_dir / "oams_macros.cfg"
+
+        # Check if oams.cfg already exists
+        if oams_cfg_path.exists():
+            overwrite = Confirm.ask("[yellow]oams.cfg already exists. Overwrite?", default=False)
+            if not overwrite:
+                console.print("[yellow]Not overwriting existing oams.cfg.")
+                return
+
+        # Fill in oams_sample.cfg with selected UUIDs and IDs
+        sample_cfg = sample_cfg_path.read_text()
+        fps_uuid = selected[0][0]  # UUID for FPS
+        mainboard_uuid = selected[1][0]  # UUID for Mainboard
+
+        # Replace the UUID placeholders in the sample config
+        sample_cfg = sample_cfg.replace("canbus_uuid: <your_unique_FPS_UUID>", f"canbus_uuid: {fps_uuid}")
+        sample_cfg = sample_cfg.replace("canbus_uuid: <your_unique_OAMS_MCU1_UUID>", f"canbus_uuid: {mainboard_uuid}")
+
+        # Write the filled config
+        oams_cfg_path.write_text(sample_cfg)
+        console.print(f"[green]Wrote new oams.cfg to {oams_cfg_path}")
+
+        # Copy macros file
+        shutil.copy(macros_cfg_path, oams_macros_path)
+        console.print(f"[green]Copied oams_macros.cfg to {oams_macros_path}")
+
+        # Check printer.cfg for include
+        printer_cfg_path = config_dir / "printer.cfg"
+        if not printer_cfg_path.exists():
+            console.print(f"[yellow]printer.cfg not found at {printer_cfg_path}. Please add the include manually.")
+            return
+
+        printer_cfg = printer_cfg_path.read_text()
+        include_line = "[include oams.cfg]"
+        if include_line in printer_cfg:
+            console.print("[green]printer.cfg already includes oams.cfg.")
+        else:
+            add_include = Confirm.ask("[yellow]printer.cfg does not include oams.cfg. Add it now?", default=True)
+            if add_include:
+                # Add include at the end
+                with printer_cfg_path.open("a") as f:
+                    f.write(f"\n{include_line}\n")
+                console.print("[green]Added oams.cfg include to printer.cfg.")
+            else:
+                console.print("[yellow]Did not modify printer.cfg. Please add the include manually if needed.")
+    else:
+        console.print(f"[red]CANBus query failed:\n{result.stderr}")
         return
 
 if __name__ == "__main__":
