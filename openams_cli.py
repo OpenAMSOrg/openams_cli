@@ -83,6 +83,54 @@ def setup():
     console.print("[bold green]Setup complete. Run the script with the [bold]deploy[/bold] command to continue.")
 
 @cli.command()
+def setup_canbus():
+    """Set up CANBus network on this system (systemd-networkd, udev, config, reboot)."""
+    console.rule("[bold blue]CANBus Network Setup")
+    # 1. Enable and start systemd-networkd
+    console.print("[cyan]Enabling and starting systemd-networkd...")
+    subprocess.run(["sudo", "systemctl", "enable", "systemd-networkd"])
+    result = subprocess.run(["sudo", "systemctl", "start", "systemd-networkd"], capture_output=True, text=True)
+    if "masked" in result.stderr:
+        console.print("[yellow]systemd-networkd is masked, unmasking and starting...")
+        subprocess.run(["sudo", "systemctl", "unmask", "systemd-networkd"])
+        subprocess.run(["sudo", "systemctl", "start", "systemd-networkd"])
+    # Check status
+    status = subprocess.run(["systemctl"], capture_output=True, text=True)
+    if "systemd-networkd" in status.stdout:
+        console.print("[green]systemd-networkd service status:")
+        console.print(status.stdout.split("systemd-networkd")[1].splitlines()[0])
+    # 2. Disable wait-online
+    console.print("[cyan]Disabling systemd-networkd-wait-online.service...")
+    subprocess.run(["sudo", "systemctl", "disable", "systemd-networkd-wait-online.service"])
+    # 3. Set CAN txqueuelen
+    console.print("[cyan]Setting CAN txqueuelen udev rule...")
+    subprocess.run(["bash", "-c", "echo -e 'SUBSYSTEM==\"net\", ACTION==\"change|add\", KERNEL==\"can*\"  ATTR{tx_queue_len}=\"128\"' | sudo tee /etc/udev/rules.d/10-can.rules > /dev/null"])
+    # Show rule
+    rule = subprocess.run(["cat", "/etc/udev/rules.d/10-can.rules"], capture_output=True, text=True)
+    console.print("[green]udev rule set:")
+    console.print(rule.stdout)
+    # 4. Create systemd-networkd CAN config
+    console.print("[cyan]Creating systemd-networkd CAN config...")
+    subprocess.run(["bash", "-c", "echo -e '[Match]\\nName=can*\\n\\n[CAN]\\nBitRate=1M\\nRestartSec=0.1s\\n\\n[Link]\\nRequiredForOnline=no' | sudo tee /etc/systemd/network/25-can.network > /dev/null"])
+    # Show config
+    netconf = subprocess.run(["cat", "/etc/systemd/network/25-can.network"], capture_output=True, text=True)
+    console.print("[green]CAN network config:")
+    console.print(netconf.stdout)
+    # 5. Reboot
+    console.print("[bold yellow]Setup complete. A reboot is required to finish CANBus setup.")
+    reboot = Confirm.ask("Reboot now?", default=True)
+    if reboot:
+        subprocess.run(["sudo", "reboot", "now"])
+    else:
+        console.print("[yellow]Please reboot manually before using CANBus.")
+    # 6. Print cabling/termination advice
+    console.print("\n[bold blue]CANBus Cabling & Termination Advice")
+    console.print("- Ensure exactly two 120Ω termination resistors: one at each end of the CANBus line.")
+    console.print("- Check crimps and strain relief on all connectors.")
+    console.print("- Use flexible, stranded wire (22-26AWG recommended).\n")
+    console.print("For more info, see: https://canbus.esoterical.online/Getting_Started.html#120r-termination-resistors and https://canbus.esoterical.online/Getting_Started.html#cabling")
+
+@cli.command()
 def deploy():
     """Deploy Katapult and Klipper to the STM32G0B1 device."""
     script_dir = Path.cwd()
