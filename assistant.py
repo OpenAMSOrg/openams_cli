@@ -130,6 +130,41 @@ def print_summary(state):
     console.print(table)
     console.print(f"[bold blue]Log file: {LOG_PATH}")
 
+def install_openams_daemon_service():
+    import shutil
+
+    script_dir = Path(__file__).parent
+    daemon_src = script_dir / "openams_daemon.py"
+    daemon_dst = Path("/usr/local/bin/openams-daemon")
+    service_dst = Path("/etc/systemd/system/openams-daemon.service")
+    venv_python = Path.home() / ".openams_env" / "bin" / "python"
+
+    # Copy the daemon script and make it executable
+    shutil.copyfile(daemon_src, daemon_dst)
+    os.chmod(daemon_dst, 0o755)
+
+    # Write the systemd service file
+    service_contents = f"""[Unit]
+Description=OpenAMS CANBus UUID Wait Daemon
+After=network.target
+
+[Service]
+Type=simple
+Environment="PATH={venv_python.parent}:$PATH"
+Environment="VIRTUAL_ENV={venv_python.parent.parent}"
+ExecStart={venv_python} {daemon_dst}
+Restart=on-failure
+User={os.environ.get('USER', 'pi')}
+
+[Install]
+WantedBy=multi-user.target
+"""
+    subprocess.run(["sudo", "tee", str(service_dst)], input=service_contents.encode(), check=True)
+    subprocess.run(["sudo", "chmod", "644", str(service_dst)], check=True)
+    subprocess.run(["sudo", "systemctl", "daemon-reload"])
+    subprocess.run(["sudo", "systemctl", "enable", "--now", "openams-daemon.service"])
+    console.print("[bold green]OpenAMS Daemon service installed and started.")
+
 def assistant():
     state = load_state()
     console.rule("[bold blue]OpenAMS Assistant")
@@ -203,59 +238,13 @@ def assistant():
     console.print("[cyan]Flashing mainboard firmware...")
     run_and_log(["python3", str(Path(__file__).parent / "openams_cli.py"), "deploy", "--board", "openams"])
 
+    install_openams_daemon_service()
+
     # 12. Final hardware instructions
     console.rule("[bold blue]Hardware Installation")
     console.print("[bold green]Install FPS and mainboard, make all connections, then restart the printer. Press [bold]Enter[/bold] when ready.")
     input()
 
-    # 13. Become daemon, wait for both UUIDs
-    console.rule("[bold blue]Waiting for Both UUIDs")
-    console.print("[cyan]Waiting for both FPS and Mainboard UUIDs to appear on CANBus...")
-
-    timeout = 60  # seconds
-    start_time = time.time()
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        TimeElapsedColumn(),
-        transient=True
-    ) as progress:
-        task = progress.add_task("[cyan]Scanning CANBus for both UUIDs...", start=True)
-        while True:
-            uuids = query_uuid()
-            if state["fps_uuid"] in uuids and len(uuids) > 1:
-                mainboard_uuid = [u for u in uuids if u != state["fps_uuid"]][0]
-                state["mainboard_uuid"] = mainboard_uuid
-                save_state(state)
-                console.print(f"[green]Mainboard UUID detected: {mainboard_uuid}")
-                log(f"Mainboard UUID: {mainboard_uuid}")
-                break
-            elapsed = time.time() - start_time
-            progress.update(task, description=f"[cyan]Scanning CANBus for both UUIDs... ({int(elapsed)}s elapsed)")
-            if elapsed > timeout:
-                console.print("[red]Timeout: Could not detect both UUIDs on CANBus after 60 seconds.")
-                log("Timeout waiting for both UUIDs on CANBus.")
-                print_summary(state)
-                sys.exit(1)
-            time.sleep(2)
-
-    # 14. Setup macros and config
-    console.rule("[bold blue]Klipper Configuration")
-    console.print("[cyan]Setting up Klipper macros and config...")
-    run_and_log([
-        "python3", str(Path(__file__).parent / "openams_cli.py"),
-        "setup_klipper_config"
-    ])
-
-    # 15. Re-enable and restart Klipper
-    console.rule("[bold blue]Restarting Klipper")
-    console.print("[cyan]Re-enabling and restarting Klipper...")
-    start_klipper()
-
-    # 16. Print summary and exit
-    console.rule("[bold green]OpenAMS Setup Complete")
-    print_summary(state)
-    log("OpenAMS Assistant completed successfully.")
 
 if __name__ == "__main__":
     assistant()
