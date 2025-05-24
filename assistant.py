@@ -5,7 +5,7 @@ import json
 import subprocess
 from pathlib import Path
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
@@ -68,12 +68,9 @@ def load_state():
 
 def run_and_log(cmd, **kwargs):
     log(f"Running: {' '.join(cmd)}")
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **kwargs)
-    for line in process.stdout:
-        print(line, end='')      # Print to console
-        log(line.rstrip())       # Log to file
-    process.wait()
-    return process
+    # Inherit stdout/stderr so colors and animations are preserved
+    result = subprocess.run(cmd, **kwargs)
+    return result
 
 def wait_for_dfu():
     with Progress(
@@ -214,16 +211,33 @@ def assistant():
     # 13. Become daemon, wait for both UUIDs
     console.rule("[bold blue]Waiting for Both UUIDs")
     console.print("[cyan]Waiting for both FPS and Mainboard UUIDs to appear on CANBus...")
-    while True:
-        uuids = query_uuid()
-        if state["fps_uuid"] in uuids and len(uuids) > 1:
-            mainboard_uuid = [u for u in uuids if u != state["fps_uuid"]][0]
-            state["mainboard_uuid"] = mainboard_uuid
-            save_state(state)
-            console.print(f"[green]Mainboard UUID detected: {mainboard_uuid}")
-            log(f"Mainboard UUID: {mainboard_uuid}")
-            break
-        time.sleep(10)
+
+    timeout = 60  # seconds
+    start_time = time.time()
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        TimeElapsedColumn(),
+        transient=True
+    ) as progress:
+        task = progress.add_task("[cyan]Scanning CANBus for both UUIDs...", start=True)
+        while True:
+            uuids = query_uuid()
+            if state["fps_uuid"] in uuids and len(uuids) > 1:
+                mainboard_uuid = [u for u in uuids if u != state["fps_uuid"]][0]
+                state["mainboard_uuid"] = mainboard_uuid
+                save_state(state)
+                console.print(f"[green]Mainboard UUID detected: {mainboard_uuid}")
+                log(f"Mainboard UUID: {mainboard_uuid}")
+                break
+            elapsed = time.time() - start_time
+            progress.update(task, description=f"[cyan]Scanning CANBus for both UUIDs... ({int(elapsed)}s elapsed)")
+            if elapsed > timeout:
+                console.print("[red]Timeout: Could not detect both UUIDs on CANBus after 60 seconds.")
+                log("Timeout waiting for both UUIDs on CANBus.")
+                print_summary(state)
+                sys.exit(1)
+            time.sleep(2)
 
     # 14. Setup macros and config
     console.rule("[bold blue]Klipper Configuration")
