@@ -1,0 +1,11 @@
+[Unit]
+Description=OpenAMS Setup Assistant
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/openams-assistant
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

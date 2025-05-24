@@ -4,6 +4,7 @@ import sys
 import time
 from pathlib import Path
 import shutil
+import platform
 
 ENV_DIR = Path.home() / ".openams_env"
 VENV_PYTHON = ENV_DIR / "bin" / "python"
@@ -65,12 +66,58 @@ KATAPULT_REPO = "https://github.com/Arksine/katapult"
 KLIPPER_REPO = "https://github.com/Klipper3d/klipper"
 
 @click.group()
-def cli():
+@click.option(
+    "--allow-missing-programmer", is_flag=True, default=False,
+    help="Allow running even if STM32_Programmer_CLI is not available (skip option byte programming)."
+)
+@click.pass_context
+def cli(ctx, allow_missing_programmer):
     require_license_agreement()
+    ctx.ensure_object(dict)
+    ctx.obj["allow_missing_programmer"] = allow_missing_programmer
+
+def ensure_stm32_programmer_cli(allow_missing=False):
+    """
+    Ensure STM32_Programmer_CLI is installed and available in PATH.
+    If allow_missing is True, skip error if not found.
+    """
+    from shutil import which
+    arch = platform.machine()
+    if arch.startswith("arm") or arch.startswith("aarch64"):
+        console.print("[yellow]STM32_Programmer_CLI is not available for ARM (Raspberry Pi). Skipping installation.")
+        console.print("[yellow]You can use dfu-util for firmware flashing, but option byte programming is not supported on ARM.")
+        if allow_missing:
+            return False
+        else:
+            sys.exit(1)
+
+    stm32_cli = which("STM32_Programmer_CLI")
+    if stm32_cli:
+        console.print(f"[green]STM32_Programmer_CLI found at {stm32_cli}")
+        return True
+
+    # Instead of attempting installation, just ask the user
+    console.print("[yellow]STM32_Programmer_CLI not found in PATH.")
+    if allow_missing:
+        console.print("[yellow]Continuing without STM32_Programmer_CLI (option byte programming will be skipped).")
+        return False
+    else:
+        proceed = Confirm.ask(
+            "[yellow]STM32_Programmer_CLI is required for option byte programming but was not found. "
+            "Do you want to continue without it? (Option byte programming will be skipped)",
+            default=True
+        )
+        if proceed:
+            console.print("[yellow]Continuing without STM32_Programmer_CLI. Option byte programming will be skipped.")
+            return False
+        else:
+            console.print("[red]STM32_Programmer_CLI is required for option byte programming. Exiting.")
+            sys.exit(1)
 
 @cli.command()
-def setup():
-    """Set up local Python environment and install dependencies."""
+@click.pass_context
+def setup(ctx):
+    allow_missing_programmer = ctx.obj.get("allow_missing_programmer", False)
     console.rule("[bold green]Environment Setup")
 
     # Install system packages
@@ -91,18 +138,28 @@ def setup():
     subprocess.run([str(pip), "install", "--upgrade", "pip"])
     subprocess.run([str(pip), "install"] + REQUIRED_PACKAGES)
 
+    # Ensure STM32_Programmer_CLI is installed
+    ensure_stm32_programmer_cli(allow_missing=allow_missing_programmer)
+
     console.print("[bold green]Setup complete. Run the script with the [bold]deploy[/bold] command to continue.")
 
 @cli.command()
-def setup_canbus():
+@click.option(
+    "--non-interactive", is_flag=True, default=False,
+    help="Run setup-canbus without user prompts (auto-continue)."
+)
+def setup_canbus(non_interactive):
     """Set up CANBus network on this system (systemd-networkd, udev, config, reboot)."""
     console.rule("[bold blue]CANBus Network Setup")
 
     # Prompt user to plug in CANBus bridge device
-    proceed = Confirm.ask("[bold yellow]Please plug in your USB-to-CANBus bridge device now. Continue?", default=True)
-    if not proceed:
-        console.print("[red]CANBus bridge device not detected. Exiting setup.")
-        sys.exit(1)
+    if not non_interactive:
+        proceed = Confirm.ask("[bold yellow]Please plug in your USB-to-CANBus bridge device now. Continue?", default=True)
+        if not proceed:
+            console.print("[red]CANBus bridge device not detected. Exiting setup.")
+            sys.exit(1)
+    else:
+        console.print("[yellow]Non-interactive mode: Skipping USB-to-CANBus bridge prompt.")
 
     # --- Check for legacy can0 setup ---
     legacy_iface_file = Path("/etc/network/interfaces.d/can0")
@@ -198,10 +255,19 @@ def setup_canbus():
     console.print("For more info, see: https://canbus.esoterical.online/Getting_Started.html#120r-termination-resistors and https://canbus.esoterical.online/Getting_Started.html#cabling")
 
 @cli.command()
-def deploy():
+@click.option(
+    "--board",
+    type=click.Choice(["fps", "openams"], case_sensitive=False),
+    help="Board to configure: 'fps' or 'openams'."
+)
+@click.option(
+    "--mode",
+    type=click.Choice(["bridge", "canbus"], case_sensitive=False),
+    help="FPS board mode: 'bridge' or 'canbus'. Only used if --board=fps."
+)
+def deploy(board, mode):
     """Deploy Katapult and Klipper to the STM32G0B1 device."""
     script_dir = Path.cwd()
-    
     console.rule("[bold blue]Starting Deployment")
     os.environ["PATH"] = f"{ENV_DIR}/bin:" + os.environ["PATH"]
 
@@ -211,23 +277,24 @@ def deploy():
         subprocess.run(['git', 'pull'], cwd=script_dir)
 
     # Board selection menu with visible options
-    console.print("\nSelect the board to configure:")
-    console.print("1. Filament Pressure Sensor board (FPS)")
-    console.print("2. OpenAMS Mainboard")
-    console.print("3. OpenAMS 2 Mainboard (coming soon)")
-    board_choice = Prompt.ask(
-        "Enter your choice [1/2]",
-        choices=["1", "2"],
-        default="1",
-        show_choices=False
-    )
-    if board_choice == "1":
-        board = "fps"
-    elif board_choice == "2":
-        board = "openams"
-    else:
-        console.print("[red]Invalid selection. Exiting.")
-        sys.exit(1)
+    if not board:
+        console.print("\nSelect the board to configure:")
+        console.print("1. Filament Pressure Sensor board (FPS)")
+        console.print("2. OpenAMS Mainboard")
+        console.print("3. OpenAMS 2 Mainboard (coming soon)")
+        board_choice = Prompt.ask(
+            "Enter your choice [1/2]",
+            choices=["1", "2"],
+            default="1",
+            show_choices=False
+        )
+        if board_choice == "1":
+            board = "fps"
+        elif board_choice == "2":
+            board = "openams"
+        else:
+            console.print("[red]Invalid selection. Exiting.")
+            sys.exit(1)
 
     # Helper to ensure device is attached to WSL if needed (shared for FPS and OpenAMS)
     def ensure_device_attached():
@@ -317,7 +384,11 @@ def deploy():
 
         os.chdir(katapult_path)
 
-        mode = Prompt.ask("Configure FPS board for", choices=["bridge", "canbus"], default="bridge")
+        # Use mode from CLI if provided, otherwise prompt
+        if not mode:
+            mode = Prompt.ask("Configure FPS board for", choices=["bridge", "canbus"], default="bridge")
+        else:
+            mode = mode.lower()
 
         # Clean up old config files and run make clean before building
         for proj_path in [katapult_path, Path.home() / "klipper"]:
@@ -482,7 +553,7 @@ def deploy():
 
 @cli.command()
 def query():
-    """Query the CANBus network for Klipper devices."""
+    """Query the CANBus network for Klipper devices and display UUIDs."""
     console.rule("[bold blue]Querying CANBus Network")
 
     # Ensure 'can' pip package is installed in the venv
@@ -511,102 +582,138 @@ def query():
                 console.print(f"  [cyan]{i}: {uuid}[/cyan]")
         else:
             console.print("[yellow]No UUIDs found in CANBus query output.")
-            return
-
-        # Require at least two UUIDs for setup
-        if len(uuids) < 2:
-            console.print("[red]At least two CANBus UUIDs are required (one FPS and one Mainboard) to set up Klipper configuration automatically.")
-            console.print(f"[yellow]Found {len(uuids)} UUID(s). Please ensure both devices are connected and try again.")
-            return
-
-        # Ask if user wants to set up Klipper configuration
-        setup_klipper = Confirm.ask("[bold yellow]Would you like to set up a Klipper configuration using these UUIDs?", default=True)
-        if not setup_klipper:
-            return
-
-        # Let user select which UUID is FPS and which is Mainboard
-        from rich.prompt import IntPrompt
-        console.print("\nSelect the UUID for each device:")
-        for idx, uuid in enumerate(uuids, 1):
-            console.print(f"  {idx}: {uuid}")
-
-        fps_idx = IntPrompt.ask("Enter the number for the FPS board UUID", choices=[str(i) for i in range(1, len(uuids)+1)])
-        mainboard_idx = IntPrompt.ask("Enter the number for the Mainboard UUID", choices=[str(i) for i in range(1, len(uuids)+1) if str(i) != str(fps_idx)])
-
-        selected = [
-            (uuids[fps_idx-1], "fps"),
-            (uuids[mainboard_idx-1], "mainboard")
-        ]
-
-        # Download oams_sample.cfg and oams_macros.cfg if not present
-        import requests
-        klipper_openams_repo = "https://raw.githubusercontent.com/OpenAMSOrg/klipper_openams/master/"
-        sample_cfg_path = Path("/tmp/oams_sample.cfg")
-        macros_cfg_path = Path("/tmp/oams_macros.cfg")
-        for url, path in [
-            (klipper_openams_repo + "oams_sample.cfg", sample_cfg_path),
-            (klipper_openams_repo + "oams_macros.cfg", macros_cfg_path)
-        ]:
-            if not path.exists():
-                r = requests.get(url)
-                if r.status_code == 200:
-                    path.write_text(r.text)
-                else:
-                    console.print(f"[red]Failed to download {url}")
-                    return
-
-        # Prepare output config directory
-        config_dir = Path.home() / "printer_data" / "config"
-        config_dir.mkdir(parents=True, exist_ok=True)
-        oams_cfg_path = config_dir / "oams.cfg"
-        oams_macros_path = config_dir / "oams_macros.cfg"
-
-        # Check if oams.cfg already exists
-        if oams_cfg_path.exists():
-            overwrite = Confirm.ask("[yellow]oams.cfg already exists. Overwrite?", default=False)
-            if not overwrite:
-                console.print("[yellow]Not overwriting existing oams.cfg.")
-                return
-
-        # Fill in oams_sample.cfg with selected UUIDs and IDs
-        sample_cfg = sample_cfg_path.read_text()
-        fps_uuid = selected[0][0]  # UUID for FPS
-        mainboard_uuid = selected[1][0]  # UUID for Mainboard
-
-        # Replace the UUID placeholders in the sample config
-        sample_cfg = sample_cfg.replace("canbus_uuid: <your_unique_FPS_UUID>", f"canbus_uuid: {fps_uuid}")
-        sample_cfg = sample_cfg.replace("canbus_uuid: <your_unique_OAMS_MCU1_UUID>", f"canbus_uuid: {mainboard_uuid}")
-
-        # Write the filled config
-        oams_cfg_path.write_text(sample_cfg)
-        console.print(f"[green]Wrote new oams.cfg to {oams_cfg_path}")
-
-        # Copy macros file
-        shutil.copy(macros_cfg_path, oams_macros_path)
-        console.print(f"[green]Copied oams_macros.cfg to {oams_macros_path}")
-
-        # Check printer.cfg for include
-        printer_cfg_path = config_dir / "printer.cfg"
-        if not printer_cfg_path.exists():
-            console.print(f"[yellow]printer.cfg not found at {printer_cfg_path}. Please add the include manually.")
-            return
-
-        printer_cfg = printer_cfg_path.read_text()
-        include_line = "[include oams.cfg]"
-        if include_line in printer_cfg:
-            console.print("[green]printer.cfg already includes oams.cfg.")
-        else:
-            add_include = Confirm.ask("[yellow]printer.cfg does not include oams.cfg. Add it now?", default=True)
-            if add_include:
-                # Add include at the end
-                with printer_cfg_path.open("a") as f:
-                    f.write(f"\n{include_line}\n")
-                console.print("[green]Added oams.cfg include to printer.cfg.")
-            else:
-                console.print("[yellow]Did not modify printer.cfg. Please add the include manually if needed.")
     else:
         console.print(f"[red]CANBus query failed:\n{result.stderr}")
+
+@cli.command()
+def setup_klipper_config():
+    """Set up Klipper configuration (oams.cfg and macros) using CANBus UUIDs."""
+    import re
+    import requests
+    from rich.prompt import IntPrompt
+
+    # Ask user to enter the UUIDs found (from query)
+    console.print("[bold blue]Klipper Configuration Setup")
+    uuids_input = Prompt.ask("Enter the CANBus UUIDs found (comma separated, in order: FPS, Mainboard)")
+    uuids = [u.strip() for u in uuids_input.split(",") if u.strip()]
+    if len(uuids) < 2:
+        console.print("[red]At least two UUIDs are required (one FPS and one Mainboard).")
         return
+
+    # Let user select which UUID is FPS and which is Mainboard
+    console.print("\nSelect the UUID for each device:")
+    for idx, uuid in enumerate(uuids, 1):
+        console.print(f"  {idx}: {uuid}")
+
+    fps_idx = IntPrompt.ask("Enter the number for the FPS board UUID", choices=[str(i) for i in range(1, len(uuids)+1)])
+    mainboard_idx = IntPrompt.ask("Enter the number for the Mainboard UUID", choices=[str(i) for i in range(1, len(uuids)+1) if str(i) != str(fps_idx)])
+
+    selected = [
+        (uuids[fps_idx-1], "fps"),
+        (uuids[mainboard_idx-1], "mainboard")
+    ]
+
+    # Download oams_sample.cfg and oams_macros.cfg if not present
+    klipper_openams_repo = "https://raw.githubusercontent.com/OpenAMSOrg/klipper_openams/master/"
+    sample_cfg_path = Path("/tmp/oams_sample.cfg")
+    macros_cfg_path = Path("/tmp/oams_macros.cfg")
+    for url, path in [
+        (klipper_openams_repo + "oams_sample.cfg", sample_cfg_path),
+        (klipper_openams_repo + "oams_macros.cfg", macros_cfg_path)
+    ]:
+        if not path.exists():
+            r = requests.get(url)
+            if r.status_code == 200:
+                path.write_text(r.text)
+            else:
+                console.print(f"[red]Failed to download {url}")
+                return
+
+    # Prepare output config directory
+    config_dir = Path.home() / "printer_data" / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    oams_cfg_path = config_dir / "oams.cfg"
+    oams_macros_path = config_dir / "oams_macros.cfg"
+
+    # Check if oams.cfg already exists
+    if oams_cfg_path.exists():
+        overwrite = Confirm.ask("[yellow]oams.cfg already exists. Overwrite?", default=False)
+        if not overwrite:
+            console.print("[yellow]Not overwriting existing oams.cfg.")
+            return
+
+    # Fill in oams_sample.cfg with selected UUIDs and IDs
+    sample_cfg = sample_cfg_path.read_text()
+    fps_uuid = selected[0][0]  # UUID for FPS
+    mainboard_uuid = selected[1][0]  # UUID for Mainboard
+
+    # Replace the UUID placeholders in the sample config
+    sample_cfg = sample_cfg.replace("canbus_uuid: <your_unique_FPS_UUID>", f"canbus_uuid: {fps_uuid}")
+    sample_cfg = sample_cfg.replace("canbus_uuid: <your_unique_OAMS_MCU1_UUID>", f"canbus_uuid: {mainboard_uuid}")
+
+    # Write the filled config
+    oams_cfg_path.write_text(sample_cfg)
+    console.print(f"[green]Wrote new oams.cfg to {oams_cfg_path}")
+
+    # Copy macros file
+    shutil.copy(macros_cfg_path, oams_macros_path)
+    console.print(f"[green]Copied oams_macros.cfg to {oams_macros_path}")
+
+    # Check printer.cfg for include
+    printer_cfg_path = config_dir / "printer.cfg"
+    if not printer_cfg_path.exists():
+        console.print(f"[yellow]printer.cfg not found at {printer_cfg_path}. Please add the include manually.")
+        return
+
+    printer_cfg = printer_cfg_path.read_text()
+    include_line = "[include oams.cfg]"
+    if include_line in printer_cfg:
+        console.print("[green]printer.cfg already includes oams.cfg.")
+    else:
+        add_include = Confirm.ask("[yellow]printer.cfg does not include oams.cfg. Add it now?", default=True)
+        if add_include:
+            # Add include at the end
+            with printer_cfg_path.open("a") as f:
+                f.write(f"\n{include_line}\n")
+            console.print("[green]Added oams.cfg include to printer.cfg.")
+        else:
+            console.print("[yellow]Did not modify printer.cfg. Please add the include manually if needed.")
+
+    # ...after querying and saving FPS UUID...
+    install_openams_assistant_service()
+    console.print("[bold cyan]System will now continue setup using the OpenAMS Assistant service.")
+
+def install_openams_assistant_service():
+    """
+    Installs and enables the openams-assistant systemd service.
+    Assumes openams-assistant.systemd and assistant.py are in the same directory as this script.
+    """
+    import shutil
+
+    script_dir = Path(__file__).parent
+    service_src = script_dir / "openams-assistant.systemd"
+    service_dst = Path("/etc/systemd/system/openams-assistant.service")
+    assistant_src = script_dir / "assistant.py"
+    assistant_dst = Path("/usr/local/bin/openams-assistant")
+
+    # Copy the systemd service file
+    shutil.copyfile(service_src, service_dst)
+    os.chmod(service_dst, 0o644)
+
+    # Copy the assistant script and make it executable
+    shutil.copyfile(assistant_src, assistant_dst)
+    os.chmod(assistant_dst, 0o755)
+
+    # Reload systemd, enable and start the service
+    subprocess.run(["sudo", "systemctl", "daemon-reload"])
+    subprocess.run(["sudo", "systemctl", "enable", "--now", "openams-assistant.service"])
+
+    console.print("[bold green]OpenAMS Assistant service installed and started.")
+
+@cli.command()
+def install_assistant():
+    """Install and enable the OpenAMS Assistant systemd service."""
+    install_openams_assistant_service()
 
 if __name__ == "__main__":
     cli()
