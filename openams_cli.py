@@ -252,6 +252,8 @@ def setup_canbus(non_interactive):
         console.print("[bold green]can0 interface is UP and ready.")
     elif can_status.returncode == 0:
         console.print("[yellow]can0 interface found but not UP. Attempting to bring it up...")
+        # Correct way: set type and bitrate before bringing up
+        subprocess.run(["sudo", "ip", "link", "set", "can0", "type", "can", "bitrate", "1000000"])
         subprocess.run(["sudo", "ip", "link", "set", "can0", "up"])
         # Re-check status
         can_status = subprocess.run(["ip", "link", "show", "can0"], capture_output=True, text=True)

@@ -13,8 +13,8 @@ if sys.executable != str(VENV_PYTHON):
     # Not running in venv: ensure venv exists and rich is installed, then re-exec
     if not VENV_DIR.exists():
         subprocess.run(["python3", "-m", "venv", str(VENV_DIR)], check=True)
-    subprocess.run([str(VENV_PYTHON), "-m", "pip", "install", "--upgrade", "pip"], check=True)
-    subprocess.run([str(VENV_PYTHON), "-m", "pip", "install", "rich"], check=True)
+        subprocess.run([str(VENV_PYTHON), "-m", "pip", "install", "--upgrade", "pip"], check=True)
+        subprocess.run([str(VENV_PYTHON), "-m", "pip", "install", "rich"], check=True)
     # Re-exec this script in the venv
     os.execv(str(VENV_PYTHON), [str(VENV_PYTHON)] + sys.argv)
 
