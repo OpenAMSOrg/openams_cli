@@ -464,7 +464,6 @@ def deploy(board, mode, allow_missing_programmer):
                     sys.exit(1)
             else:
                 if not allow_missing_programmer:
-                    console.print("[red]This is windows")
                     console.print("[red]STM32_Programmer_CLI.exe not found in standard locations. Please check your STM32CubeProgrammer installation.")
                     sys.exit(1)
                 else:
@@ -490,7 +489,6 @@ def deploy(board, mode, allow_missing_programmer):
                     sys.exit(1)
             else:
                 if not allow_missing_programmer:
-                    console.print("[red] THIS IS SHIT")
                     console.print("[red]STM32_Programmer_CLI not found in PATH. Please install STM32CubeProgrammer and ensure STM32_Programmer_CLI is available.")
                     sys.exit(1)
                 else:
