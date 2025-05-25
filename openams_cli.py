@@ -194,13 +194,20 @@ def setup_canbus(non_interactive):
             subprocess.run(["sudo", "rm", "-f", str(legacy_iface_file)])
             console.print("[green]Removed /etc/network/interfaces.d/can0")
         if interfaces_file.exists():
-            # Remove can0 lines from /etc/network/interfaces
+            # Remove can0 lines from /etc/network/interfaces with sudo (elevated permissions)
+            # Read lines first
+            lines = []
             with interfaces_file.open() as f:
                 lines = f.readlines()
-            with interfaces_file.open("w") as f:
+            # Write filtered lines to a temp file
+            import tempfile
+            with tempfile.NamedTemporaryFile("w", delete=False) as tmpf:
                 for line in lines:
                     if "can0" not in line:
-                        f.write(line)
+                        tmpf.write(line)
+                tmp_path = tmpf.name
+            # Move temp file to interfaces_file with sudo
+            subprocess.run(["sudo", "mv", tmp_path, str(interfaces_file)], check=True)
             console.print("[green]Removed can0 entries from /etc/network/interfaces")
         # Restart networking
         subprocess.run(["sudo", "systemctl", "restart", "networking"])
