@@ -216,7 +216,7 @@ def assistant():
 
     # 3. Instruct user for BOOT jumper
     console.rule("[bold blue]Step 3/10: Prepare FPS Board")
-    console.print("[bold magenta]🛠️  Please place the BOOT jumper on the FPS board and press [bold]Enter[/bold] to continue.")
+    console.print("[bold magenta]🛠️  Please place the BOOT jumper on the FPS board, connect it to the RPI, and press [bold]Enter[/bold] to continue.")
     input()
 
     # 4. Wait for DFU device
@@ -233,7 +233,7 @@ def assistant():
 
     # 6. Instruct user to remove jumper and replug
     console.rule("[bold blue]Step 6/10: Reconnect FPS Board")
-    console.print("[bold magenta]🔌 Remove the BOOT jumper, unplug and replug the FPS board, then press [bold]Enter[/bold].")
+    console.print("[bold magenta]🔌 Remove the BOOT jumper, unplug, and replug the FPS board, then press [bold]Enter[/bold].")
     input()
 
     # 7. Wait for bridge device
