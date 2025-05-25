@@ -13,6 +13,10 @@ VENV_PIP = ENV_DIR / "bin" / "pip"
 LICENSE_PATH = Path(__file__).parent / "LICENSE"
 LICENSE_ACCEPTED_PATH = Path(".license_accepted")
 
+APT_PACKAGES = [
+    "gcc-arm-none-eabi", "make", "dfu-util", "git", "python3-venv"
+]
+
 def require_license_agreement():
     # If the acceptance file exists, skip prompt
     if LICENSE_ACCEPTED_PATH.exists():
@@ -34,6 +38,10 @@ def require_license_agreement():
         sys.exit(1)
     # Write acceptance file
     LICENSE_ACCEPTED_PATH.touch()
+    
+print("[BOOTSTRAP] Installing mimimal required packages...")
+subprocess.run(["sudo", "apt", "update"])
+subprocess.run(["sudo", "apt", "install", "-y"] + APT_PACKAGES)
 
 # Step 1: Minimal environment setup to bootstrap required packages
 if not ENV_DIR.exists():
@@ -58,9 +66,7 @@ REQUIRED_PACKAGES = [
     "click", "rich"
 ]
 
-APT_PACKAGES = [
-    "gcc-arm-none-eabi", "make", "dfu-util", "git", "python3-venv"
-]
+
 
 KATAPULT_REPO = "https://github.com/Arksine/katapult"
 KLIPPER_REPO = "https://github.com/Klipper3d/klipper"
@@ -119,11 +125,6 @@ def ensure_stm32_programmer_cli(allow_missing=False):
 def setup(ctx):
     allow_missing_programmer = ctx.obj.get("allow_missing_programmer", False)
     console.rule("[bold green]Environment Setup")
-
-    # Install system packages
-    console.print("[bold cyan]Installing system dependencies (requires sudo)...")
-    subprocess.run(["sudo", "apt", "update"])
-    subprocess.run(["sudo", "apt", "install", "-y"] + APT_PACKAGES)
 
     # Create virtual environment
     if not ENV_DIR.exists():
