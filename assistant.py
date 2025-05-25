@@ -228,7 +228,7 @@ def assistant():
     console.rule("[bold blue]Step 5/10: Flash FPS Firmware")
     console.print("[cyan]Flashing FPS firmware...")
     run_and_log([
-        str(VENV_PYTHON), str(Path(__file__).parent / "openams_cli.py"), "deploy", "--board", "fps", "--mode", "bridge"
+        str(VENV_PYTHON), str(Path(__file__).parent / "openams_cli.py"), "deploy", "--board", "fps", "--mode", "bridge", "--allow-missing-programmer"
     ])
 
     # 6. Instruct user to remove jumper and replug

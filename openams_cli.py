@@ -316,7 +316,7 @@ def deploy(board, mode, allow_missing_programmer):
             sys.exit(1)
 
     # Helper to ensure device is attached to WSL if needed (shared for FPS and OpenAMS)
-    def ensure_device_attached():
+    def ensure_device_attached(allow_missing_programmer=False):
         if sys.platform == "win32" or os.environ.get("WSL_DISTRO_NAME"):
             console.print("[yellow]Detected Windows/WSL environment. Checking for usbipd-win...")
             usbipd_path = "/mnt/c/Windows/System32/usbipd.exe"
@@ -489,6 +489,7 @@ def deploy(board, mode, allow_missing_programmer):
                     sys.exit(1)
             else:
                 if not allow_missing_programmer:
+                    console.print("[red] THIS IS SHIT")
                     console.print("[red]STM32_Programmer_CLI not found in PATH. Please install STM32CubeProgrammer and ensure STM32_Programmer_CLI is available.")
                     sys.exit(1)
                 else:
