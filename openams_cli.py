@@ -48,8 +48,8 @@ if not ENV_DIR.exists():
     print("[BOOTSTRAP] Creating virtual environment at ~/.openams_env...")
     subprocess.run(["python3", "-m", "venv", str(ENV_DIR)], check=True)
 
-subprocess.run([str(VENV_PIP), "install", "--upgrade", "pip"], check=True)
-subprocess.run([str(VENV_PIP), "install", "click", "rich"], check=True)
+    subprocess.run([str(VENV_PIP), "install", "--upgrade", "pip"], check=True)
+    subprocess.run([str(VENV_PIP), "install", "click", "rich"], check=True)
 
 # Step 2: Ensure environment is in sys.path
 activate_site = str(ENV_DIR / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages")
