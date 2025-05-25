@@ -1,13 +1,43 @@
 import os
 import sys
+import subprocess
 import time
 import json
-import subprocess
 from pathlib import Path
+
+# --- Bootstrap: ensure venv and rich, then re-exec in venv if needed ---
+VENV_DIR = Path.home() / ".openams_env"
+VENV_PYTHON = VENV_DIR / "bin" / "python"
+
+if sys.executable != str(VENV_PYTHON):
+    # Not running in venv: ensure venv exists and rich is installed, then re-exec
+    if not VENV_DIR.exists():
+        subprocess.run(["python3", "-m", "venv", str(VENV_DIR)], check=True)
+    subprocess.run([str(VENV_PYTHON), "-m", "pip", "install", "--upgrade", "pip"], check=True)
+    subprocess.run([str(VENV_PYTHON), "-m", "pip", "install", "rich"], check=True)
+    # Re-exec this script in the venv
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON)] + sys.argv)
+
+# Now safe to import rich
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
+
+# --- Ensure venv site-packages is in sys.path ---
+site_packages = None
+if VENV_DIR.exists():
+    # Find the correct site-packages directory
+    lib_dir = VENV_DIR / "lib"
+    if lib_dir.exists():
+        for sub in lib_dir.iterdir():
+            if sub.name.startswith("python"):
+                candidate = sub / "site-packages"
+                if candidate.exists():
+                    site_packages = candidate
+                    break
+if site_packages and str(site_packages) not in sys.path:
+    sys.path.insert(0, str(site_packages))
 
 LOG_PATH = "/var/log/openams_assistant.log"
 STATE_PATH = "/var/lib/openams_assistant/state.json"
@@ -66,7 +96,9 @@ def load_state():
             return {}
     return {}
 
-def run_and_log(cmd, **kwargs):
+def run_and_log(cmd, use_venv_python=False, **kwargs):
+    if use_venv_python and cmd[0] == "python3":
+        cmd = [str(VENV_PYTHON)] + cmd[1:]
     log(f"Running: {' '.join(cmd)}")
     # Inherit stdout/stderr so colors and animations are preserved
     result = subprocess.run(cmd, **kwargs)
@@ -102,7 +134,7 @@ def wait_for_can_bridge():
 
 def query_uuid():
     result = subprocess.run(
-        ["python3", str(Path(__file__).parent / "openams_cli.py"), "query"],
+        [str(VENV_PYTHON), str(Path(__file__).parent / "openams_cli.py"), "query"],
         capture_output=True, text=True
     )
     import re
@@ -176,7 +208,7 @@ def assistant():
     # 1. Setup environment
     console.rule("[bold blue]Step 1/10: Python Environment Setup")
     console.print("[cyan]Setting up Python environment...")
-    run_and_log(["python3", str(Path(__file__).parent / "openams_cli.py"), "setup", "--allow-missing-programmer"])
+    run_and_log([str(VENV_PYTHON), str(Path(__file__).parent / "openams_cli.py"), "setup", "--allow-missing-programmer"])
 
     # 2. Shutdown Klipper
     console.rule("[bold blue]Step 2/10: Stopping Klipper")
@@ -196,7 +228,7 @@ def assistant():
     console.rule("[bold blue]Step 5/10: Flash FPS Firmware")
     console.print("[cyan]Flashing FPS firmware...")
     run_and_log([
-        "python3", str(Path(__file__).parent / "openams_cli.py"), "deploy", "--board", "fps", "--mode", "bridge"
+        str(VENV_PYTHON), str(Path(__file__).parent / "openams_cli.py"), "deploy", "--board", "fps", "--mode", "bridge"
     ])
 
     # 6. Instruct user to remove jumper and replug
@@ -212,7 +244,7 @@ def assistant():
     # 8. Setup CANBus
     console.rule("[bold blue]Step 8/10: CANBus Setup")
     console.print("[cyan]Setting up CANBus...")
-    run_and_log(["python3", str(Path(__file__).parent / "openams_cli.py"), "setup-canbus", "--non-interactive"])
+    run_and_log([str(VENV_PYTHON), str(Path(__file__).parent / "openams_cli.py"), "setup-canbus", "--non-interactive"])
 
     # 9. Query CANBus for FPS UUID
     console.rule("[bold blue]Step 9/10: Query FPS UUID")
@@ -236,7 +268,7 @@ def assistant():
     # 11. Flash mainboard
     console.rule("[bold blue]Flashing Mainboard Firmware")
     console.print("[cyan]Flashing mainboard firmware...")
-    run_and_log(["python3", str(Path(__file__).parent / "openams_cli.py"), "deploy", "--board", "openams"])
+    run_and_log([str(VENV_PYTHON), str(Path(__file__).parent / "openams_cli.py"), "deploy", "--board", "openams"])
 
     install_openams_daemon_service()
 

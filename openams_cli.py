@@ -122,9 +122,14 @@ def ensure_stm32_programmer_cli(allow_missing=False):
             sys.exit(1)
 
 @cli.command()
+@click.option(
+    "--allow-missing-programmer", is_flag=True, default=False,
+    help="Allow running even if STM32_Programmer_CLI is not available (skip option byte programming)."
+)
 @click.pass_context
-def setup(ctx):
-    allow_missing_programmer = ctx.obj.get("allow_missing_programmer", False)
+def setup(ctx, allow_missing_programmer):
+    ctx.ensure_object(dict)
+    ctx.obj["allow_missing_programmer"] = allow_missing_programmer
     console.rule("[bold green]Environment Setup")
 
     # Create virtual environment
