@@ -172,8 +172,8 @@ def install_openams_daemon_service():
     venv_python = Path.home() / ".openams_env" / "bin" / "python"
 
     # Copy the daemon script and make it executable
-    shutil.copyfile(daemon_src, daemon_dst)
-    os.chmod(daemon_dst, 0o755)
+    subprocess.run(["sudo", "cp", str(daemon_src), str(daemon_dst)], check=True)
+    subprocess.run(["sudo", "chmod", "755", str(daemon_dst)], check=True)
 
     # Write the systemd service file
     service_contents = f"""[Unit]
