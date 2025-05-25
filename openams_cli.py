@@ -279,7 +279,11 @@ def setup_canbus(non_interactive):
     type=click.Choice(["bridge", "canbus"], case_sensitive=False),
     help="FPS board mode: 'bridge' or 'canbus'. Only used if --board=fps."
 )
-def deploy(board, mode):
+@click.option(
+    "--allow-missing-programmer", is_flag=True, default=False,
+    help="Allow running even if STM32_Programmer_CLI is not available (skip option byte programming)."
+)
+def deploy(board, mode, allow_missing_programmer):
     """Deploy Katapult and Klipper to the STM32G0B1 device."""
     script_dir = Path.cwd()
     console.rule("[bold blue]Starting Deployment")
@@ -458,8 +462,11 @@ def deploy(board, mode):
                     console.print(f"[red]Failed to set option bytes: {result.stderr}")
                     sys.exit(1)
             else:
-                console.print("[red]STM32_Programmer_CLI.exe not found in standard locations. Please check your STM32CubeProgrammer installation.")
-                sys.exit(1)
+                if not allow_missing_programmer:
+                    console.print("[red]STM32_Programmer_CLI.exe not found in standard locations. Please check your STM32CubeProgrammer installation.")
+                    sys.exit(1)
+                else:
+                    console.print("[yellow]STM32_Programmer_CLI.exe not found, but --allow-missing-programmer is set. Skipping option byte programming.")
         else:
             # Linux: try to find STM32_Programmer_CLI in PATH
             from shutil import which
@@ -480,8 +487,11 @@ def deploy(board, mode):
                     console.print(f"[red]Failed to set option bytes: {result.stderr}")
                     sys.exit(1)
             else:
-                console.print("[red]STM32_Programmer_CLI not found in PATH. Please install STM32CubeProgrammer and ensure STM32_Programmer_CLI is available.")
-                sys.exit(1)
+                if not allow_missing_programmer:
+                    console.print("[red]STM32_Programmer_CLI not found in PATH. Please install STM32CubeProgrammer and ensure STM32_Programmer_CLI is available.")
+                    sys.exit(1)
+                else:
+                    console.print("[yellow]STM32_Programmer_CLI not found, but --allow-missing-programmer is set. Skipping option byte programming.")
 
         ensure_device_attached()
 
