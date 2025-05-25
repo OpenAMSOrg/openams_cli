@@ -15,8 +15,8 @@ if sys.executable != str(VENV_PYTHON):
         subprocess.run(["python3", "-m", "venv", str(VENV_DIR)], check=True)
     subprocess.run([str(VENV_PYTHON), "-m", "pip", "install", "--upgrade", "pip"], check=True)
     subprocess.run([str(VENV_PYTHON), "-m", "pip", "install", "rich"], check=True)
-# Re-exec this script in the venv
-os.execv(str(VENV_PYTHON), [str(VENV_PYTHON)] + sys.argv)
+    # Re-exec this script in the venv
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON)] + sys.argv)
 
 # Now safe to import rich
 from rich.console import Console

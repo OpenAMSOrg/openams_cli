@@ -39,15 +39,16 @@ def require_license_agreement():
     # Write acceptance file
     LICENSE_ACCEPTED_PATH.touch()
     
-print("[BOOTSTRAP] Installing mimimal required packages...")
-subprocess.run(["sudo", "apt", "update"])
-subprocess.run(["sudo", "apt", "install", "-y"] + APT_PACKAGES)
+
 
 # Step 1: Minimal environment setup to bootstrap required packages
 if not ENV_DIR.exists():
+    print("[BOOTSTRAP] Installing minimal required packages...")
+    subprocess.run(["sudo", "apt", "update"])
+    subprocess.run(["sudo", "apt", "install", "-y"] + APT_PACKAGES)
+    
     print("[BOOTSTRAP] Creating virtual environment at ~/.openams_env...")
     subprocess.run(["python3", "-m", "venv", str(ENV_DIR)], check=True)
-
     subprocess.run([str(VENV_PIP), "install", "--upgrade", "pip"], check=True)
     subprocess.run([str(VENV_PIP), "install", "click", "rich"], check=True)
 
