@@ -46,21 +46,14 @@ OpenAMS setup is divided into two main phases:
    cd openams_cli
    ```
 
-2. **Run the setup command** to install dependencies:
-   ```sh
-   python3 openams_cli.py setup
-   ```
-
-3. **Install the boards in your printer and connect to the Raspberry Pi.**
-
-4. **Start the interactive assistant** (on the Raspberry Pi) to guide you through the full hardware and firmware setup:
+2. **Start the interactive assistant** (on the Raspberry Pi) to guide you through the full hardware and firmware setup:
    ```sh
    python3 assistant.py
    ```
    - The assistant will walk you through firmware flashing, environment setup, CANBus configuration, and UUID detection.
    - All actions are logged to `/var/log/openams_assistant.log`.
 
-5. **Automated UUID detection and Klipper configuration**  
+3. **Automated UUID detection and Klipper configuration**  
    After the initial setup, the assistant will install and enable a systemd daemon (`openams-daemon`) that, after a reboot:
    - Waits for both FPS and Mainboard CANBus UUIDs to appear.
    - Automatically configures Klipper macros and config files.
