@@ -14,7 +14,7 @@ if sys.executable != str(VENV_PYTHON):
     if not VENV_DIR.exists():
         subprocess.run(["python3", "-m", "venv", str(VENV_DIR)], check=True)
         subprocess.run([str(VENV_PYTHON), "-m", "pip", "install", "--upgrade", "pip"], check=True)
-        subprocess.run([str(VENV_PYTHON), "-m", "pip", "install", "rich"], check=True)
+        subprocess.run([str(VENV_PYTHON), "-m", "pip", "install", "click", "rich"], check=True)
     # Re-exec this script in the venv
     os.execv(str(VENV_PYTHON), [str(VENV_PYTHON)] + sys.argv)
 
@@ -209,6 +209,12 @@ def assistant():
     console.rule("[bold blue]Step 1/10: Python Environment Setup")
     console.print("[cyan]Setting up Python environment...")
     run_and_log([str(VENV_PYTHON), str(Path(__file__).parent / "openams_cli.py"), "setup", "--allow-missing-programmer"])
+    
+    # we want to source the environment variables for the rest of the script
+    os.environ["PATH"] = str(VENV_PYTHON.parent) + ":" + os.environ["PATH"]
+    os.environ["VIRTUAL_ENV"] = str(VENV_PYTHON.parent.parent)
+    log("Python environment setup complete.")
+    console.print("[bold green]Python environment setup complete.\n")
 
     # 2. Shutdown Klipper
     console.rule("[bold blue]Step 2/10: Stopping Klipper")
@@ -274,8 +280,7 @@ def assistant():
 
     # 12. Final hardware instructions
     console.rule("[bold blue]Hardware Installation")
-    console.print("[bold green]Install FPS and mainboard, make all connections, then restart the printer. Press [bold]Enter[/bold] when ready.")
-    input()
+    console.print("[bold green]Install FPS and mainboard, make all connections, then restart the printer.")
 
 
 if __name__ == "__main__":
